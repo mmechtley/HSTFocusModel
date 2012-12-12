@@ -23,8 +23,6 @@ __author__ = 'Matt Mechtley'
 __copyright__  = '2012, Creative Commons Attribution-ShareAlike 3.0'
 import httplib, urllib
 
-_http_headers = {'Content-type':'application/x-www-form-urlencoded',
-                 'Accept': 'text/plain; image/png'}
 _focus_tool_server = 'focustool.stsci.edu:80'
 _focus_request_url = '/cgi-bin/control3.py'
 
