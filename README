@@ -1,0 +1,40 @@
+Matt Mechtley - Dec 2012 - https://github.com/mmechtley
+Python interface to the HST Focus Model hosted at the Space Telescope Science
+Institute (see http://www.stsci.edu/hst/observatory/focus/FocusModel).
+
+Because the model queries 5-minute interval temperature telemetry from 2003
+onwards (much data), STScI provides it as a web service. The STScI website
+provides a web form interface, but no programmatic interface, so it is
+time-consuming to make many queries. This module builds HTTP POST requests
+which are submitted to the STScI CGI script to generate the output data on
+their server, and then retrives those output data.
+
+Overview from the STScI website:
+
+For a given time, this model estimates the amount of defocus at a particular
+camera. The model is a function of telemetered temperatures and secular terms.
+The temperature dependent part of the model is taken from Di Nino et al. 2008
+while the long-term secular trend is a more recent determination given in
+Niemi et al., 2010. In addition to the temperature terms and secular double
+exponential, the model includes zero point offsets characterizing the focus
+offsets between cameras and channels.
+
+Installation:
+-------------
+Standard:
+python setup.py install
+
+Using a non-standard library location (e.g. Dropbox):
+python setup.py install --prefix=~/Dropbox/Python
+
+Example Usage:
+--------------
+import HSTFocusModel
+
+txt_table = HSTFocusModel.get_model_data(2012,'01/20','12:00','14:00')
+
+txt_table2,png_image = HSTFocusModel.get_model_data(2008,'01/20',
+                                                    '12:00','14:00',
+                                                    camera='WFC1',
+                                                    format='BOTH')
+
