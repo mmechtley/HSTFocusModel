@@ -19,15 +19,24 @@ Niemi et al., 2010. In addition to the temperature terms and secular double
 exponential, the model includes zero point offsets characterizing the focus
 offsets between cameras and channels.
 """
+from __future__ import division
+import httplib
+import urllib
+from StringIO import StringIO
+from numpy import floor, genfromtxt
+from scipy.interpolate import UnivariateSpline
+
 __author__ = 'Matt Mechtley'
 __copyright__  = '2012, Creative Commons Attribution-ShareAlike 3.0'
-import httplib, urllib
 
-_focus_tool_server = 'focustool.stsci.edu:80'
-_focus_request_url = '/cgi-bin/control3.py'
+_server = 'focustool.stsci.edu:80'
+_request_url = '/cgi-bin/control3.py'
 
 _txt_table_file_fmt = '/images/focusdata{Year}.{Date}_{Start}-{Stop}.txt'
 _png_plot_file_fmt = '/images/focusplot{Year}.{Date}_{Start}-{Stop}.png'
+
+# Formatted in the way numpy.genfromtxt expects
+_model_output_columns = 'JulianDate, Month, Day, Year, Time, Model'
 
 class HTTPResponseError(Exception):
 	def __init__(self,response):
@@ -64,8 +73,8 @@ def get_model_data(year, date, start, stop, camera='UVIS1', format='TXT'):
 	                 'Start':start,
 	                 'Stop':stop}
 	## These are the form controls passed via POST on the website
-	conn = httplib.HTTPConnection(_focus_tool_server)
-	conn.request('POST', _focus_request_url,
+	conn = httplib.HTTPConnection(_server)
+	conn.request('POST', _request_url,
 	             urllib.urlencode(form_controls),
 	             {'Content-type':'application/x-www-form-urlencoded'})
 	response = conn.getresponse()
@@ -104,11 +113,91 @@ def get_model_data(year, date, start, stop, camera='UVIS1', format='TXT'):
 	else:
 		return txt_data, png_data
 
-# Can also run from the command line. First argument should be date in
-# YYYY/MM/DD format, second argument is time range in HH:MM-HH:MM 24-hour
-# format
-if __name__ == '__main__':
-	import sys
-	year,date = sys.argv[1].split('/',1)
-	start,stop = sys.argv[2].split('-')
-	print get_model_data(year,date,start,stop)
+def mean_focus(expstart, expend, camera='UVIS1', spline_order=3):
+	"""
+	Gets the mean focus over a given observation period.
+	:param expstart: Start of exposure, Modified Julian Date (like FITS keyword)
+	:param expend: End of exposure, Modified Julian Date (like FITS keyword)
+	:param camera: One of UVIS1, UVIS2, WFC1, WFC2, HRC, PC. Default is UVIS1.
+	:param spline_order: Degree of the spline used to interpolate the model
+	data points (passed as k= to scipy.interpolate.UnivariateSpline). Use 1 for
+	linear interpolation. Default is 3.
+	:return: Continuous (integral) mean focus between expstart and expend
+	"""
+	# Pad input exposure start and end time, to make sure we get at least one
+	# data point before and after
+	expstart, expend = float(expstart), float(expend)
+	ten_mins = 10/(24*60)
+	expstart_pad = float(expstart) - ten_mins
+	expend_pad = float(expend) + ten_mins
+	year, date, start = _mjd_to_year_date_time(expstart_pad)
+	year, date, stop = _mjd_to_year_date_time(expend_pad)
+	# Chop off seconds
+	start = start.rsplit(':', 1)[0]
+	stop = stop.rsplit(':', 1)[0]
+
+	# Get text table of focus data, convert to numpy array
+	txt_focus = get_model_data(year, date, start, stop, camera, format='TXT')
+	focus_data = genfromtxt(StringIO(txt_focus), skiprows=1, dtype=None,
+	                        names=_model_output_columns)
+	# Create interpolating spline
+	spline = UnivariateSpline(focus_data['JulianDate'], focus_data['Model'],
+	                          k=spline_order)
+	# Return the continuous (integral) mean
+	return spline.integral(expstart, expend)/(expend-expstart)
+
+def _mjd_to_year_date_time(mjd):
+	"""
+	Convert Modified Julian Date number to (year, date, time) tuple
+	:param mjd:
+	:return: 3-tuple of (YYYY, MM/DD, HH:MM:SS) (int, string, string)
+	"""
+	# Adapted from libastro/XEphem included in pyephem, which erroneously
+	# calls its dates Modified Julian Date, when in fact they are Dublin
+	# Julian Date (Dec 31 1899 12:00 zero point).
+	# https://github.com/brandon-rhodes/pyephem/blob/master/libastro-3.7.5/mjd.c
+
+	_mjd_to_dublin = -15019.5 # Conversion from MJD to Dublin JD (Wikipedia)
+	_days_per_year = 365.25 # In JD convention, anyway
+
+	# For Gregorian calendar days.
+	_gregorian_change_date = -115860.0 # Date of Julian-Gregorian change in DJD
+	# 14.99835726 leap days skipped up to Dec 31 1899 12:00
+	_leapskips_epoch = 14.99835726
+	_days_per_century = 36524.25
+
+	days1900 = mjd + _mjd_to_dublin + 0.5 # +12h moves ref pt to 1/1/1900 00:00
+	day_int = floor(days1900)
+	day_frac = days1900 - day_int
+
+	if day_frac == 1:
+		day_frac = 0
+		day_int += 1
+
+	# Is the date a Gregorian Calendar date?
+	if day_int > _gregorian_change_date:
+		leapskips = floor((day_int / _days_per_century) + _leapskips_epoch)
+		# Add skipped leap days, but subtract off for 400-divisible years
+		day_int += 1 + leapskips - floor(leapskips / 4.0)
+
+	## TODO: Give variables semantic names
+	b = floor((day_int / _days_per_year) + .802601)
+	ce = day_int - floor((_days_per_year*b) + .750001) + 416
+	g = floor(ce / 30.6001)
+	month = int(g - 1)
+	day = int(ce - floor(30.6001*g) + day_frac)
+	year = int(b + 1899)
+
+	if g > 13.5:
+		month = int(g - 13)
+	if month < 2.5:
+		year = int(b + 1900)
+	if year < 1:
+		year -= 1
+
+	hour = int(24*day_frac)
+	minute = int((day_frac - hour / 24)*24*60)
+	second = int((day_frac - hour / 24 - minute / (24*60))*24*3600)
+
+	return (year, '{0:02d}/{1:02d}'.format(month,day),
+	        '{0:02d}:{1:02d}:{2:02d}'.format(hour,minute,second))
