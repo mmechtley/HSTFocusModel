@@ -19,6 +19,11 @@ Niemi et al., 2010. In addition to the temperature terms and secular double
 exponential, the model includes zero point offsets characterizing the focus
 offsets between cameras and channels.
 
+Required Modules:
+---------
+numpy (1.4+)
+scipy (0.8+)
+
 Installation:
 -------------
 Standard:
