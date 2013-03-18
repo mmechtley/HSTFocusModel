@@ -2,12 +2,10 @@
 Interfaces with the HST Focus Model hosted at the Space Telescope Science
 Institute (see http://www.stsci.edu/hst/observatory/focus/FocusModel).
 
-Because the model queries 5-minute interval temperature telemetry from 2003
-onwards (much data), STScI provides it as a web service. The STScI website
-provides a web form interface, but no programmatic interface, so it is
-time-consuming to make many queries. This module builds HTTP POST requests
-which are submitted to the STScI CGI script to generate the output data on
-their server, and then retrives those output data.
+STScI provides it as a web service with a form interface, but no programmatic
+interface, so it is time-consuming to make many queries. This module builds
+HTTP POST requests which are submitted to the STScI CGI script to generate the
+output data on their server, and then retrives those output data.
 
 Overview from the STScI website:
 
@@ -22,6 +20,7 @@ offsets between cameras and channels.
 from __future__ import division
 import httplib
 import urllib
+import re
 from StringIO import StringIO
 from numpy import floor, genfromtxt
 from scipy.interpolate import UnivariateSpline
@@ -118,23 +117,35 @@ def get_model_data(year, date, start, stop, camera='UVIS1', format='TXT'):
 
 def mean_focus(expstart, expend, camera='UVIS1', spline_order=3):
     """
-    Gets the mean focus over a given observation period.
-    :param expstart: Start of exposure, Modified Julian Date (like FITS keyword)
-    :param expend: End of exposure, Modified Julian Date (like FITS keyword)
+    Gets the mean focus over a given observation period. Exposure start and end
+    times can be specified as Modified Julian Date float (like the FITS header
+    EXPSTART and EXPEND keywords) or a UTC time string in YYYY-MM-DD HH:MM:SS
+    format.
+    :param expstart: Start time of exposure.
+    :param expend: End time of exposure.
     :param camera: One of UVIS1, UVIS2, WFC1, WFC2, HRC, PC. Default is UVIS1.
     :param spline_order: Degree of the spline used to interpolate the model
     data points (passed as k= to scipy.interpolate.UnivariateSpline). Use 1 for
     linear interpolation. Default is 3.
     :return: Continuous (integral) mean focus between expstart and expend
     """
+    # Convert date/time strings to MJD
+    try:
+        startnums = [int(num) for num in re.split(':|-|/| ', expstart)]
+        endnums = [int(num) for num in re.split(':|-|/| ', expend)]
+        expstart = _date_time_to_mjd(*startnums)
+        expend = _date_time_to_mjd(*endnums)
+    except TypeError:
+        pass
+    print expstart, expend
     # Pad input exposure start and end time, to make sure we get at least one
-    # data point before and after
-    expstart, expend = float(expstart), float(expend)
+    # data point before and after. Then split up into year, date, times
     ten_mins = 10 / (24 * 60)
     expstart_pad = float(expstart) - ten_mins
     expend_pad = float(expend) + ten_mins
     year, date, start = _mjd_to_year_date_time(expstart_pad)
     year, date, stop = _mjd_to_year_date_time(expend_pad)
+    print year, date, start, stop
     # Chop off seconds
     start = start.rsplit(':', 1)[0]
     stop = stop.rsplit(':', 1)[0]
@@ -161,16 +172,16 @@ def _mjd_to_year_date_time(mjd):
     # Julian Date (Dec 31 1899 12:00 zero point).
     # https://github.com/brandon-rhodes/pyephem/blob/master/libastro-3.7.5/mjd.c
 
-    _mjd_to_dublin = -15019.5 # Conversion from MJD to Dublin JD (Wikipedia)
-    _days_per_year = 365.25 # In JD convention, anyway
+    _mjd_to_dublin = -15019.5  # Conversion from MJD to Dublin JD (Wikipedia)
+    _days_per_year = 365.25  # In JD convention, anyway
 
     # For Gregorian calendar days.
-    _gregorian_change_date = -115860.0 # Date of Julian-Gregorian change in DJD
+    _gregorian_change_date = -115860.0  # Date of Julian-Gregorian change in DJD
     # 14.99835726 leap days skipped up to Dec 31 1899 12:00
     _leapskips_epoch = 14.99835726
     _days_per_century = 36524.25
 
-    days1900 = mjd + _mjd_to_dublin + 0.5 # +12h moves ref pt to 1/1/1900 00:00
+    days1900 = mjd + _mjd_to_dublin + 0.5  # +12h moves ref pt to 1/1/1900 00:00
     day_int = floor(days1900)
     day_frac = days1900 - day_int
 
@@ -205,3 +216,40 @@ def _mjd_to_year_date_time(mjd):
 
     return (year, '{0:02d}/{1:02d}'.format(month, day),
             '{0:02d}:{1:02d}:{2:02d}'.format(hour, minute, second))
+
+
+def _date_time_to_mjd(year, month, day, hours, minutes, seconds):
+    """
+    Convert a calendar date to a Modified Julian Day Number
+    """
+    # Adapted from pyephem/libastro, which uses Dublin Julian Date (different
+    # zero point from MJD). So at the end, we add a conversion factor
+    _last_gregorian_date = (1582, 10, 14)
+    _dublin_to_modified = 15019.5
+    m = month
+    y = year + 1 if year < 0 else year
+    if month < 3:
+        m += 12
+        y -= 1
+
+    # Handle differently before and after Julian-Gregorian changeover
+    if all([date <= ref for date, ref in zip((year, month, day),
+                                             _last_gregorian_date)]):
+        b = 0
+    else:
+        n_centuries = y // 100
+        b = 2 - n_centuries + n_centuries // 4
+
+    # Handle differently before and after epoch zero point
+    if y < 0:
+        c = ((365.25 * y) - 0.75) - 694025
+    else:
+        c = (365.25 * y) - 694025
+
+    d = 30.6001 * (m + 1)
+
+    dublin_jd = b + c + d + day - 0.5
+
+    dublin_jd += hours / 24 + minutes / 1440 + seconds / 86400
+
+    return dublin_jd + _dublin_to_modified
