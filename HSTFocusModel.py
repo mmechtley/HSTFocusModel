@@ -40,6 +40,7 @@ _model_output_columns = 'JulianDate, Month, Day, Year, Time, Model'
 
 class HTTPResponseError(Exception):
     def __init__(self, response):
+        self.response = response
         self.message = 'Bad response from server\n{} {}'.format(
             response.status, response.reason)
 
@@ -115,7 +116,8 @@ def get_model_data(year, date, start, stop, camera='UVIS1', format='TXT'):
         return txt_data, png_data
 
 
-def mean_focus(expstart, expend, camera='UVIS1', spline_order=3):
+def mean_focus(expstart, expend, camera='UVIS1', spline_order=3,
+               not_found_value=None):
     """
     Gets the mean focus over a given observation period. Exposure start and end
     times can be specified as Modified Julian Date float (like the FITS header
@@ -125,8 +127,11 @@ def mean_focus(expstart, expend, camera='UVIS1', spline_order=3):
     :param expend: End time of exposure.
     :param camera: One of UVIS1, UVIS2, WFC1, WFC2, HRC, PC. Default is UVIS1.
     :param spline_order: Degree of the spline used to interpolate the model
-    data points (passed as k= to scipy.interpolate.UnivariateSpline). Use 1 for
-    linear interpolation. Default is 3.
+     data points (passed as k= to scipy.interpolate.UnivariateSpline). Use 1 for
+     linear interpolation. Default is 3.
+    :param not_found_value: Value to return if the Focus Model does not have
+     data for the given time interval. Default value (None) means raise
+     HTTPResponseError
     :return: Continuous (integral) mean focus between expstart and expend
     """
     # Convert date/time strings to MJD
@@ -137,7 +142,6 @@ def mean_focus(expstart, expend, camera='UVIS1', spline_order=3):
         expend = _date_time_to_mjd(*endnums)
     except TypeError:
         pass
-    print expstart, expend
     # Pad input exposure start and end time, to make sure we get at least one
     # data point before and after. Then split up into year, date, times
     ten_mins = 10 / (24 * 60)
@@ -145,20 +149,30 @@ def mean_focus(expstart, expend, camera='UVIS1', spline_order=3):
     expend_pad = float(expend) + ten_mins
     year, date, start = _mjd_to_year_date_time(expstart_pad)
     year, date, stop = _mjd_to_year_date_time(expend_pad)
-    print year, date, start, stop
     # Chop off seconds
     start = start.rsplit(':', 1)[0]
     stop = stop.rsplit(':', 1)[0]
 
-    # Get text table of focus data, convert to numpy array
-    txt_focus = get_model_data(year, date, start, stop, camera, format='TXT')
-    focus_data = genfromtxt(StringIO(txt_focus), skiprows=1, dtype=None,
-                            names=_model_output_columns)
-    # Create interpolating spline
-    spline = UnivariateSpline(focus_data['JulianDate'], focus_data['Model'],
-                              k=spline_order)
-    # Return the continuous (integral) mean
-    return spline.integral(expstart, expend) / (expend - expstart)
+    try:
+        # Get text table of focus data, convert to numpy array
+        txt_focus = get_model_data(year, date, start, stop, camera,
+                                   format='TXT')
+        focus_data = genfromtxt(StringIO(txt_focus), skiprows=1, dtype=None,
+                                names=_model_output_columns)
+        # Create interpolating spline
+        spline = UnivariateSpline(focus_data['JulianDate'], focus_data['Model'],
+                                  k=spline_order)
+        # Return the continuous (integral) mean
+        meanFoc = spline.integral(expstart, expend) / (expend - expstart)
+
+    except HTTPResponseError, err:
+        if (err.response.status == httplib.NOT_FOUND and
+                    not_found_value is not None):
+            meanFoc = not_found_value
+        else:
+            raise err
+
+    return meanFoc
 
 
 def _mjd_to_year_date_time(mjd):
