@@ -37,6 +37,10 @@ _png_plot_file_fmt = '/images/focusplot{Year}.{Date}_{Start}-{Stop}.png'
 # Formatted in the way numpy.genfromtxt expects
 _model_output_columns = 'JulianDate, Month, Day, Year, Time, Model'
 
+# Field widths in the text download format. Sadly the output is not delimiter-
+# separated
+_output_field_widths = (12, 4, 3, 5, 9, 8)
+
 
 class HTTPResponseError(Exception):
     def __init__(self, response):
@@ -80,6 +84,7 @@ def get_model_data(year, date, start, stop, camera='UVIS1', format='TXT'):
                  urllib.urlencode(form_controls),
                  {'Content-type': 'application/x-www-form-urlencoded'})
     response = conn.getresponse()
+    conn.close()
     if response.status != httplib.OK:
         raise HTTPResponseError(response)
 
@@ -94,19 +99,21 @@ def get_model_data(year, date, start, stop, camera='UVIS1', format='TXT'):
     ## Retrieve generated data files
     png_data, txt_data = None, None
     if format in ('TXT', 'BOTH'):
+        conn = httplib.HTTPConnection(_server)
         conn.request('GET', txt_table_url, headers={'Accept': 'text/plain'})
         response = conn.getresponse()
         if response.status != httplib.OK:
             raise HTTPResponseError(response)
         txt_data = response.read()
+        conn.close()
     if format in ('PNG', 'BOTH'):
+        conn = httplib.HTTPConnection(_server)
         conn.request('GET', png_plot_url, headers={'Accept': 'image/png'})
         response = conn.getresponse()
         if response.status != httplib.OK:
             raise HTTPResponseError(response)
         png_data = response.read()
-
-    conn.close()
+        conn.close()
 
     if format == 'PNG':
         return png_data
@@ -158,7 +165,8 @@ def mean_focus(expstart, expend, camera='UVIS1', spline_order=3,
         txt_focus = get_model_data(year, date, start, stop, camera,
                                    format='TXT')
         focus_data = genfromtxt(StringIO(txt_focus), skiprows=1, dtype=None,
-                                names=_model_output_columns)
+                                names=_model_output_columns,
+                                delimiter=_output_field_widths)
         # Create interpolating spline
         spline = UnivariateSpline(focus_data['JulianDate'], focus_data['Model'],
                                   k=spline_order)
