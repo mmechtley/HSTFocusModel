@@ -23,6 +23,7 @@ Required Modules:
 ---------
 numpy (1.4+)
 scipy (0.8+)
+pyfits
 
 Installation:
 -------------

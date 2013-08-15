@@ -43,7 +43,8 @@ _output_field_widths = (12, 4, 3, 5, 9, 8)
 
 
 class HTTPResponseError(Exception):
-    def __init__(self, response):
+    def __init__(self, url, response):
+        self.url = url
         self.response = response
         self.message = 'Bad response from server\n{} {}'.format(
             response.status, response.reason)
@@ -86,7 +87,7 @@ def get_model_data(year, date, start, stop, camera='UVIS1', format='TXT'):
     response = conn.getresponse()
     conn.close()
     if response.status != httplib.OK:
-        raise HTTPResponseError(response)
+        raise HTTPResponseError(_request_url, response)
 
     ## Build URLs for the generated data files (table and/or image)
     filename_params = {'Year': year,
@@ -103,7 +104,7 @@ def get_model_data(year, date, start, stop, camera='UVIS1', format='TXT'):
         conn.request('GET', txt_table_url, headers={'Accept': 'text/plain'})
         response = conn.getresponse()
         if response.status != httplib.OK:
-            raise HTTPResponseError(response)
+            raise HTTPResponseError(txt_table_url, response)
         txt_data = response.read()
         conn.close()
     if format in ('PNG', 'BOTH'):
@@ -111,7 +112,7 @@ def get_model_data(year, date, start, stop, camera='UVIS1', format='TXT'):
         conn.request('GET', png_plot_url, headers={'Accept': 'image/png'})
         response = conn.getresponse()
         if response.status != httplib.OK:
-            raise HTTPResponseError(response)
+            raise HTTPResponseError(png_plot_url, response)
         png_data = response.read()
         conn.close()
 
@@ -181,6 +182,28 @@ def mean_focus(expstart, expend, camera='UVIS1', spline_order=3,
             raise err
 
     return meanFoc
+
+
+def add_mean_focus_to_header(filename, ext=0, focus_key='FOCUS', **kwargs):
+    """
+    Calculates the mean focus for the given fits file (based on EXPSTART and
+    EXPEND header keywords), and saves the calculated focus into the header.
+    :param filename: Filename to calculate focus for
+    :param ext: FITS extension that contains EXPSTART and EXPEND keywords
+    :param focus_key: Keyword in which to save focus value
+    :param kwargs: Additional keyword arguments, passed to mean_focus()
+    """
+    try:
+        import pyfits
+    except ImportError, err:
+        print 'pyfits module is required for reading and writing fits headers'
+        pyfits = None
+        raise err
+    expstart = pyfits.getval(filename, 'EXPSTART', ext=ext)
+    expend = pyfits.getval(filename, 'EXPEND', ext=ext)
+    focus = mean_focus(expstart, expend, **kwargs)
+    pyfits.setval(filename, focus_key, value=focus,
+                  comment='Estimated mean focus (HST Focus Model)')
 
 
 def _mjd_to_year_date_time(mjd):
