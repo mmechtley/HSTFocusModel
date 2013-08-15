@@ -155,17 +155,28 @@ def mean_focus(expstart, expend, camera='UVIS1', spline_order=3,
     ten_mins = 10 / (24 * 60)
     expstart_pad = float(expstart) - ten_mins
     expend_pad = float(expend) + ten_mins
-    year, date, start = _mjd_to_year_date_time(expstart_pad)
-    year, date, stop = _mjd_to_year_date_time(expend_pad)
+    start_yr, start_date, start_time = _mjd_to_year_date_time(expstart_pad)
+    stop_yr, stop_date, stop_time = _mjd_to_year_date_time(expend_pad)
     # Chop off seconds
-    start = start.rsplit(':', 1)[0]
-    stop = stop.rsplit(':', 1)[0]
+    start_time = start_time.rsplit(':', 1)[0]
+    stop_time = stop_time.rsplit(':', 1)[0]
+
+    if start_date != stop_date:
+        intervals = [(start_yr, start_date, start_time, '23:59'),
+                     (stop_yr, stop_date, '00:00', stop_time)]
+    else:
+        intervals = [(start_yr, start_date, start_time, stop_time)]
 
     try:
-        # Get text table of focus data, convert to numpy array
-        txt_focus = get_model_data(year, date, start, stop, camera,
-                                   format='TXT')
-        focus_data = genfromtxt(StringIO(txt_focus), skiprows=1, dtype=None,
+        txt_focus = ''
+        # Get text table of focus data for each interval
+        for year, date, start, stop in intervals:
+            txt_interval = get_model_data(year, date, start, stop, camera,
+                                          format='TXT')
+            col_names, txt_interval = txt_interval.split('\n', 1)
+            txt_focus += txt_interval
+        # convert to numpy array
+        focus_data = genfromtxt(StringIO(txt_focus), skiprows=0, dtype=None,
                                 names=_model_output_columns,
                                 delimiter=_output_field_widths)
         # Create interpolating spline
@@ -175,8 +186,8 @@ def mean_focus(expstart, expend, camera='UVIS1', spline_order=3,
         meanFoc = spline.integral(expstart, expend) / (expend - expstart)
 
     except HTTPResponseError, err:
-        if (err.response.status == httplib.NOT_FOUND and
-                    not_found_value is not None):
+        if any([err.response.status == httplib.NOT_FOUND,
+                not_found_value is not None]):
             meanFoc = not_found_value
         else:
             raise err
