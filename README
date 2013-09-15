@@ -23,7 +23,7 @@ Required Modules:
 ---------
 numpy (1.4+)
 scipy (0.8+)
-pyfits
+pyfits (optional, for add_mean_focus_to_header function)
 
 Installation:
 -------------
@@ -37,6 +37,7 @@ Example Usage:
 --------------
 import HSTFocusModel
 
+# Get text table or plotted png image of focus data
 txt_table = HSTFocusModel.get_model_data(2012,'01/20','12:00','14:00')
 
 txt_table2,png_image = HSTFocusModel.get_model_data(2008,'01/20',
@@ -44,3 +45,6 @@ txt_table2,png_image = HSTFocusModel.get_model_data(2008,'01/20',
                                                     camera='WFC1',
                                                     format='BOTH')
 
+# Automatically calculate the mean focus value for a given image, and store it
+# in the image header
+HSTFocusModel.add_mean_focus_to_header('hst_image.fits')

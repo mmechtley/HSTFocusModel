@@ -21,6 +21,7 @@ from __future__ import division
 import httplib
 import urllib
 import re
+from datetime import date
 from StringIO import StringIO
 from numpy import floor, genfromtxt
 from scipy.interpolate import UnivariateSpline
@@ -280,7 +281,7 @@ def _date_time_to_mjd(year, month, day, hours, minutes, seconds):
     """
     # Adapted from pyephem/libastro, which uses Dublin Julian Date (different
     # zero point from MJD). So at the end, we add a conversion factor
-    _last_gregorian_date = (1582, 10, 14)
+    _last_gregorian_date = date(1582, 10, 14)
     _dublin_to_modified = 15019.5
     m = month
     y = year + 1 if year < 0 else year
@@ -289,8 +290,7 @@ def _date_time_to_mjd(year, month, day, hours, minutes, seconds):
         y -= 1
 
     # Handle differently before and after Julian-Gregorian changeover
-    if all([date <= ref for date, ref in zip((year, month, day),
-                                             _last_gregorian_date)]):
+    if date(year, month, day) < _last_gregorian_date:
         b = 0
     else:
         n_centuries = y // 100
