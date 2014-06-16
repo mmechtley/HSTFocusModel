@@ -23,7 +23,7 @@ import urllib
 import re
 from datetime import date
 from StringIO import StringIO
-from numpy import floor, genfromtxt
+from numpy import floor, genfromtxt, linspace, trapz
 from scipy.interpolate import UnivariateSpline
 
 __author__ = 'Matt Mechtley'
@@ -126,7 +126,7 @@ def get_model_data(year, date, start, stop, camera='UVIS1', format='TXT'):
 
 
 def mean_focus(expstart, expend, camera='UVIS1', spline_order=3,
-               not_found_value=None):
+               not_found_value=None, with_var=False):
     """
     Gets the mean focus over a given observation period. Exposure start and end
     times can be specified as Modified Julian Date float (like the FITS header
@@ -141,6 +141,7 @@ def mean_focus(expstart, expend, camera='UVIS1', spline_order=3,
     :param not_found_value: Value to return if the Focus Model does not have
      data for the given time interval. Default value (None) means raise
      HTTPResponseError
+     :param with_var: Also include variance in a returned 2-tuple
     :return: Continuous (integral) mean focus between expstart and expend
     """
     # Convert date/time strings to MJD
@@ -184,25 +185,37 @@ def mean_focus(expstart, expend, camera='UVIS1', spline_order=3,
         spline = UnivariateSpline(focus_data['JulianDate'], focus_data['Model'],
                                   k=spline_order)
         # Return the continuous (integral) mean
-        meanFoc = spline.integral(expstart, expend) / (expend - expstart)
+        mean_foc = spline.integral(expstart, expend) / (expend - expstart)
+        # Calculate signal variance (see e.g. Wikipedia article for RMS)
+        if with_var:
+            xvals = linspace(expstart, expend, focus_data.size*2)
+            var_foc = trapz(spline(xvals)**2, xvals) / (expend - expstart)
+            var_foc -= mean_foc**2
 
     except HTTPResponseError, err:
-        if any([err.response.status == httplib.NOT_FOUND,
-                not_found_value is not None]):
-            meanFoc = not_found_value
+        if err.response.status == httplib.NOT_FOUND \
+                or not_found_value is not None:
+            mean_foc = not_found_value
+            var_foc = not_found_value
         else:
             raise err
 
-    return meanFoc
+    if with_var:
+        return mean_foc, var_foc
+    else:
+        return mean_foc
 
 
-def add_mean_focus_to_header(filename, ext=0, focus_key='FOCUS', **kwargs):
+def add_mean_focus_to_header(filename, ext=0, with_var=False, focus_key='FOCUS',
+                             var_key='FOCUSVAR', **kwargs):
     """
     Calculates the mean focus for the given fits file (based on EXPSTART and
     EXPEND header keywords), and saves the calculated focus into the header.
     :param filename: Filename to calculate focus for
     :param ext: FITS extension that contains EXPSTART and EXPEND keywords
+    :param with_var: Should variance be calculated and saved as well?
     :param focus_key: Keyword in which to save focus value
+    :param var_key: Keyword in which to save focus variance value
     :param kwargs: Additional keyword arguments, passed to mean_focus()
     """
     try:
@@ -213,9 +226,13 @@ def add_mean_focus_to_header(filename, ext=0, focus_key='FOCUS', **kwargs):
         raise err
     expstart = pyfits.getval(filename, 'EXPSTART', ext=ext)
     expend = pyfits.getval(filename, 'EXPEND', ext=ext)
-    focus = mean_focus(expstart, expend, **kwargs)
-    pyfits.setval(filename, focus_key, value=focus,
-                  comment='Estimated mean focus (HST Focus Model)')
+    focus = mean_focus(expstart, expend, with_var=with_var, **kwargs)
+    if not hasattr(focus, 'count'):
+        focus = (focus, )
+    comments = ('Estimated mean focus (HST Focus Model)',
+                'Estimated focus variance (HST Focus Model)')
+    for key, val, comment in zip((focus_key, var_key), focus, comments):
+        pyfits.setval(filename, key, value=val, comment=comment)
 
 
 def _mjd_to_year_date_time(mjd):
