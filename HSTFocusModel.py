@@ -274,7 +274,7 @@ def _mjd_to_year_date_time(mjd):
     ce = day_int - floor((_days_per_year * b) + .750001) + 416
     g = floor(ce / 30.6001)
     month = int(g - 1)
-    day = int(ce - floor(30.6001 * g) + day_frac)
+    day = int(ce - floor(30.6001 * g))
     year = int(b + 1899)
 
     if g > 13.5:
@@ -315,11 +315,11 @@ def _date_time_to_mjd(year, month, day, hours, minutes, seconds):
 
     # Handle differently before and after epoch zero point
     if y < 0:
-        c = ((365.25 * y) - 0.75) - 694025
+        c = long((365.25 * y) - 0.75) - 694025
     else:
-        c = (365.25 * y) - 694025
+        c = long(365.25 * y) - 694025
 
-    d = 30.6001 * (m + 1)
+    d = int(30.6001 * (m + 1))
 
     dublin_jd = b + c + d + day - 0.5
 
