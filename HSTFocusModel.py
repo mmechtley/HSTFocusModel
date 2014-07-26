@@ -24,7 +24,7 @@ import re
 from datetime import date
 from StringIO import StringIO
 from numpy import floor, genfromtxt, linspace, trapz
-from scipy.interpolate import UnivariateSpline
+from scipy.interpolate import InterpolatedUnivariateSpline
 
 __author__ = 'Matt Mechtley'
 __copyright__ = '2012, Creative Commons Attribution-ShareAlike 3.0'
@@ -182,8 +182,8 @@ def mean_focus(expstart, expend, camera='UVIS1', spline_order=3,
                                 names=_model_output_columns,
                                 delimiter=_output_field_widths)
         # Create interpolating spline
-        spline = UnivariateSpline(focus_data['JulianDate'], focus_data['Model'],
-                                  k=spline_order)
+        spline = InterpolatedUnivariateSpline(
+            focus_data['JulianDate'], focus_data['Model'], k=spline_order)
         # Return the continuous (integral) mean
         mean_foc = spline.integral(expstart, expend) / (expend - expstart)
         # Calculate signal variance (see e.g. Wikipedia article for RMS)
